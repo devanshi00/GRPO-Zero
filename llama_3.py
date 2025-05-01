@@ -208,13 +208,21 @@ class LlamaForCausalLM(nn.Module):
         config_file = Path(ckpt_path) / "config.json"
         with open(config_file, "r") as f:
             config_dict = json.load(f)
-        config = LlamaConfig(**config_dict)
-
+        # Only keep keys that LlamaConfig accepts
+        valid_keys = {
+            "vocab_size", "hidden_size", "intermediate_size", "num_hidden_layers",
+            "num_attention_heads", "num_key_value_heads", "max_position_embeddings",
+            "rms_norm_eps", "initializer_range", "hidden_act", "pad_token_id",
+            "bos_token_id", "eos_token_id", "attention_dropout", "mlp_bias", "attention_bias"
+        }
+        filtered_config = {k: v for k, v in config_dict.items() if k in valid_keys}
+        config = LlamaConfig(**filtered_config)
+    
         with torch.device("meta"):
             model = cls(config, device=device)
-
+    
         import safetensors.torch
-
+    
         model_weight_files = sorted(Path(ckpt_path).glob("model*.safetensors"))
         weights = {}
         for file in model_weight_files:
@@ -223,6 +231,7 @@ class LlamaForCausalLM(nn.Module):
         weights = {k.replace("model.", ""): v for k, v in weights.items()}
         model.load_state_dict(weights, strict=True)
         return model.to(device)
+
 
 # # ---------------------------
 # # Example usage
