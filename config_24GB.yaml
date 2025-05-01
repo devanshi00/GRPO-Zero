@@ -1,16 +1,16 @@
 model:
-  pretrained_model_path: "Qwen/Qwen2.5-3B-Instruct"
+  pretrained_model_path: "meta-llama/Llama-3.2-1B-Instruct"
   device: "cuda"
   dtype: "bfloat16"
 data:
-  path: "Countdown-Tasks-3to4"
+  path: "winogender"
   test_size: 16
 training:
   random_seed: 1337
   max_prompt_len: 256
   max_gen_len: 1024
-  batch_size: 256
-  num_questions_per_batch: 32
+  batch_size: 16
+  num_questions_per_batch: 16
   # Number of examples per gradient accumulation step
   micro_batch_size: 2
   max_grad_norm: 1.0
@@ -20,7 +20,7 @@ training:
   ckpt_dir: "ckpt"
   log_dir: "logs"
   skip_unfinished_episodes: false
-  ckpt_save_interval: 100
-  eval_interval: 10
+  ckpt_save_interval: 10
+  eval_interval: 5
   # save GPU memory by offloading the optimizer states to CPU
   memory_efficient_adamw: true
