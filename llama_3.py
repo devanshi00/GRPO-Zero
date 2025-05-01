@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, Union
-
+from dataclasses import fields
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -203,19 +203,16 @@ class LlamaForCausalLM(nn.Module):
             loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-100)
         return {"logits": logits, "loss": loss}
 
+
+
     @classmethod
     def from_pretrained(cls, ckpt_path, device: torch.device):
         config_file = Path(ckpt_path) / "config.json"
         with open(config_file, "r") as f:
             config_dict = json.load(f)
         # Only keep keys that LlamaConfig accepts
-        valid_keys = {
-            "vocab_size", "hidden_size", "intermediate_size", "num_hidden_layers",
-            "num_attention_heads", "num_key_value_heads", "max_position_embeddings",
-            "rms_norm_eps", "initializer_range", "hidden_act", "pad_token_id",
-            "bos_token_id", "eos_token_id", "attention_dropout", "mlp_bias", "attention_bias"
-        }
-        filtered_config = {k: v for k, v in config_dict.items() if k in valid_keys}
+        llama_config_fields = {f.name for f in fields(LlamaConfig)}
+        filtered_config = {k: v for k, v in config_dict.items() if k in llama_config_fields}
         config = LlamaConfig(**filtered_config)
     
         with torch.device("meta"):
@@ -231,6 +228,7 @@ class LlamaForCausalLM(nn.Module):
         weights = {k.replace("model.", ""): v for k, v in weights.items()}
         model.load_state_dict(weights, strict=True)
         return model.to(device)
+
 
 
 # # ---------------------------
