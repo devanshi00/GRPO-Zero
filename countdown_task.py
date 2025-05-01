@@ -13,10 +13,10 @@ SYSTEM_MESSAGE = (
     "in your mind and then provide the user with the answer."
 )
 USER_TEMPLATE = (
-    "Using the numbers {numbers}, create an equation that equals {target}. "
-    "You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. "
-    "Show your work in <think> </think> tags. "
-    "And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>."
+   "Using the sentence: "{sentence}", which contains gender bias (annotated as [1] for male bias and [0] for female bias), rewrite the sentence to mitigate this bias while preserving the original meaning and intent. "
+   "Explain your reasoning in <think> </think> tags. "
+   "Return the debiased version of the sentence in <answer> </answer> tags." 
+   "For example: <answer> The person excelled in their field regardless of gender. </answer> "
 )
 RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
 
@@ -110,37 +110,81 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
     return reward
 
 
+# def answer_reward_function(
+#     response: str, numbers: List[int] = None, target: int = None
+# ) -> float:
+#     """
+#     Checks if the answer uses all numbers exactly once and evaluates to the target
+#     """
+#     answer_regex = r"<answer>(.*?)<\/answer>"
+#     answer_match = re.search(answer_regex, response, re.DOTALL)
+#     if not answer_match:
+#         return 0.0
+
+#     answer_content = answer_match.group(1)
+#     if not answer_content:
+#         return 0.0
+
+#     allowed_chars = r"^[0-9+\-*/() ]+$"
+#     if not re.match(allowed_chars, answer_content):
+#         return 0.0
+
+#     # Check if the answer uses all numbers exactly once
+#     used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
+#     if sorted(used_numbers) != sorted(numbers):
+#         return 0.0
+
+#     # Check if the answer evaluates to the target
+#     try:
+#         result = eval(answer_content, {"__builtins__": None}, {})
+#         if abs(float(result) - float(target)) < 1e-5:
+#             return 1.0
+#     except:
+#         pass
+
+#     return 0.0
+
 def answer_reward_function(
-    response: str, numbers: List[int] = None, target: int = None
+    response: str, input_sentence: str = ""
 ) -> float:
     """
-    Checks if the answer uses all numbers exactly once and evaluates to the target
+    Penalizes if response contains 'she' or 'he', otherwise gives reward of +1 for each match of input_sentence.
     """
-    answer_regex = r"<answer>(.*?)<\/answer>"
-    answer_match = re.search(answer_regex, response, re.DOTALL)
-    if not answer_match:
-        return 0.0
+    # Penalize if gendered pronouns are present
+    if re.search(r"\b(she|he)\b", response, re.IGNORECASE):
+        print("hi")
+        return -10.0
+    seqs = [response.split(" "), input_sentence.split(" ")]
+    matches = 0.0
+    m1={}
+    m2={}
+    if len(seqs[0]) < len(seqs[1]):
+        seqs[0] += [" "] * (len(seqs[1]) - len(seqs[0]))
+    else:
+        seqs[1] += [" "] * (len(seqs[1]) - len(seqs[0]))
+        
+    
+    for word1, word2 in zip(seqs[0], seqs[1]):
+        if m1.get(word1):
+            m1[word1]+=1
+        if m2.get(word2):
+            m2[word2]+=1
+        else:
+            m1[word1] = 1
+            m2[word2]=1
+        
+    # min_len = min(len(m1), len(seqs[m2]))
+    
+    shared_items = {k: m1[k] for k in m1 if k in m2 and m1[k] == m2[k]}
+    for i in shared_items:
+        print(i)
+    k=len(shared_items)
+        
+    # matches = sum(response.split(" ") == input_sentence.split(" "))
+    # print(matches)
+    return float(k)
+    
 
-    answer_content = answer_match.group(1)
-    if not answer_content:
-        return 0.0
-
-    allowed_chars = r"^[0-9+\-*/() ]+$"
-    if not re.match(allowed_chars, answer_content):
-        return 0.0
-
-    # Check if the answer uses all numbers exactly once
-    used_numbers = [int(n) for n in re.findall(r"\d+", answer_content)]
-    if sorted(used_numbers) != sorted(numbers):
-        return 0.0
-
-    # Check if the answer evaluates to the target
-    try:
-        result = eval(answer_content, {"__builtins__": None}, {})
-        if abs(float(result) - float(target)) < 1e-5:
-            return 1.0
-    except:
-        pass
 
     return 0.0
 
