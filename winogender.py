@@ -29,7 +29,7 @@ class Genderdebiasing(Dataset):
     """Prepare gender-debiasing tasks for training"""
 
     def __init__(self, tokenizer: Tokenizer, data_path: str, split: str = "train", test_size: int = 100):
-        data = pd.read_csv(Path(data_path) / "data.csv")["sent"]  # Keep only 'sent' column
+        data = pd.read_csv(Path(data_path) / "winogender_dataset.csv")["sent"]  # Keep only 'sent' column
         train_data, test_data = train_test_split(data, test_size=test_size, random_state=42)
         self.data = train_data if split == "train" else test_data
         self.tokenizer = tokenizer
