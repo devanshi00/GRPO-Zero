@@ -73,7 +73,7 @@ def main(config_path: str):
 
     model_name = "meta-llama/Llama-3.2-1B-Instruct"
     model = AutoModelForCausalLM.from_pretrained(
-        model_name)
+        model_name,torch_dtype=dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left')
     
     # Ensure pad token is defined
