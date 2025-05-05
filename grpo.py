@@ -79,7 +79,7 @@ def rollout(
         base_idx = i // num_answer_per_question
         rewards = reward_function(
             response=generated_text,
-            sentences=batch.sentences[base_idx],
+            sentence=batch.sentences[base_idx],
             # target=batch.target[base_idx],
             end_token=end_token,
         )
