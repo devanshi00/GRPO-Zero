@@ -138,20 +138,27 @@ def update_policy(
     dtype: torch.dtype,
 ):
     total_start = time.time()
+    print("🔄 Normalizing rewards...")
     episodes = normalize_rewards_per_group(episodes)
+
+    print("🔀 Sorting episodes by sequence length...")
     episodes.sort(key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids))
 
     num_micro_batches = math.ceil(len(episodes) / micro_batch_size)
     num_target_tokens = sum(len(ep.generated_token_ids) for ep in episodes)
+    print(f"📦 Total micro batches: {num_micro_batches}")
+    print(f"🔢 Total target tokens: {num_target_tokens}")
+
     entropy = 0.0
 
     for i in range(0, len(episodes), micro_batch_size):
+        print(f"\n📤 Processing micro batch {i // micro_batch_size + 1}")
         j = min(i + micro_batch_size, len(episodes))
         batch = episodes[i:j]
         lens = [len(ep.prefix_token_ids) + len(ep.generated_token_ids) for ep in batch]
         max_len = max(lens)
-        print("MMMMMMMMMMM")
-        print(max_len)
+        print(f"📏 Max length in batch: {max_len}")
+        print(f"📊 Lengths in batch: {lens}")
 
         token_ids = [
             ep.prefix_token_ids + ep.generated_token_ids + [pad_token_id] * (max_len - l)
@@ -163,6 +170,10 @@ def update_policy(
         ]
         advantages = [ep.reward for ep in batch]
 
+        print(f"🧾 Token IDs (first in batch): {token_ids[0]}")
+        print(f"🛡️ Masks (first in batch): {masks[0]}")
+        print(f"💰 Advantages: {advantages}")
+
         token_ids = torch.tensor(token_ids, device=device)
         masks = torch.tensor(masks, device=device, dtype=torch.bool)
         advantages = torch.tensor(advantages, device=device, dtype=torch.float32)
@@ -171,25 +182,42 @@ def update_policy(
             input_ids = token_ids[:, :-1]
             target_ids = token_ids[:, 1:]
             target_masks = masks[:, 1:]
+
+            print(f"📥 Input IDs shape: {input_ids.shape}")
+            print(f"🎯 Target IDs shape: {target_ids.shape}")
+            print(f"🎭 Target mask shape: {target_masks.shape}")
+
             logits = model(input_ids).logits.float()
+            print(f"📈 Logits shape: {logits.shape}")
 
         log_probs = -torch.nn.functional.cross_entropy(
-           
             logits.reshape(-1, logits.size(-1)), 
             target_ids.reshape(-1),
             ignore_index=pad_token_id,
             reduction="none"
         ).reshape(input_ids.size(0), -1)
 
+        print(f"🧮 Log probs shape: {log_probs.shape}")
+        print(f"📉 Log probs (first row): {log_probs[0]}")
+
         with torch.no_grad():
-            entropy += (compute_entropy(logits) * target_masks).sum() / num_target_tokens
+            batch_entropy = (compute_entropy(logits) * target_masks).sum() / num_target_tokens
+            entropy += batch_entropy
+            print(f"🧠 Batch entropy: {batch_entropy.item()}")
 
         obj = log_probs * advantages[:, None]
+        print(f"📐 Objective shape: {obj.shape}")
+
         obj = (obj * target_masks).sum() / num_target_tokens
+        print(f"📊 Scaled objective: {obj.item()}")
+
         loss = -obj
+        print(f"❌ Loss: {loss.item()}")
         loss.backward()
 
     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+    print(f"📏 Gradient norm: {grad_norm.item()}")
+
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
 
