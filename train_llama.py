@@ -14,8 +14,19 @@ from winogender import Genderdebiasing,reward_function
 from grpo import rollout, update_policy
 from optimizer import MemoryEfficientAdamW
 # from qwen2_model import Transformer
-from tokenizer import Tokenizer
-from llama_3 import LlamaForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model_name = "meta-llama/Llama-3.2-1B-Instruct"
+model = AutoModelForCausalLM.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# Step 1: Add pad_token if not present
+if tokenizer.pad_token is None:
+    tokenizer.add_special_tokens({'pad_token': 'pad'})
+
+# Step 2: Resize model embeddings to include the new token
+model.resize_token_embeddings(len(tokenizer))
+
 
 def evaluate(model, tokenizer, device, dtype, config):
     test_dataset = Genderdebiasing(
