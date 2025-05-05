@@ -30,100 +30,78 @@ def rollout(
     pad_token_id = tokenizer.pad_token_id
     prefix_token_ids = batch.prefix_token_ids
     bsz = len(batch.prefix) * num_answer_per_question
-    min_prompt_len = min(len(t) for t in prefix_token_ids)
-    max_prompt_len = max(len(t) for t in prefix_token_ids)
-    total_len = max_gen_len + max_prompt_len
     print(f"⏱️ [Setup] {time.time() - time0:.3f}s")
 
+    # Prepare input tokens
     time1 = time.time()
-    tokens = torch.full((bsz, total_len), pad_token_id, dtype=torch.long, device=device)
-    for k, t in enumerate(prefix_token_ids):
-        offset = k * num_answer_per_question
-        for i in range(num_answer_per_question):
-            tokens[offset + i, : len(t)] = torch.tensor(t, dtype=torch.long, device=device)
+    input_ids = []
+    for t in prefix_token_ids:
+        for _ in range(num_answer_per_question):
+            input_ids.append(torch.tensor(t, dtype=torch.long))
+    input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
+    input_ids = input_ids.to(device)
     print(f"⏱️ [Token preparation] {time.time() - time1:.3f}s")
 
-    prev_pos = 0
-    input_text_mask = tokens != pad_token_id
-    assert min_prompt_len < total_len
-    is_finished = torch.zeros((bsz,), dtype=torch.bool, device=device)
-
+    # Generate sequences
     time2 = time.time()
-    for cur_pos in range(min_prompt_len, total_len):
-        print(
-            f"\r* Generating trajectories: {cur_pos-min_prompt_len:>4d}/{total_len-min_prompt_len:>4d}",
-            flush=True,
-            end="",
-        )
+    attention_mask = input_ids != pad_token_id
+    model = model.to(device).eval()
+    generated_ids = model.generate(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        max_new_tokens=max_gen_len,
+        do_sample=True,
+        top_k=50,
+        pad_token_id=pad_token_id,
+        eos_token_id=end_token_id,
+    )
+    print(f"⏱️ [Generation] {time.time() - time2:.3f}s")
 
-        with torch.autocast(device_type=device.type, dtype=dtype):
-            outputs = model(input_ids=tokens[:, :cur_pos])
-            logits = outputs.logits
-
-        probs = torch.softmax(logits[:, -1], dim=-1)
-        next_token = torch.multinomial(probs, num_samples=1).reshape(-1)
-
-        next_token = torch.where(input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token)
-        next_token = torch.where(is_finished, pad_token_id, next_token)
-        tokens[:, cur_pos] = next_token
-
-        if end_token_id is not None:
-            is_end_token = next_token == end_token_id
-            is_generated_token = ~input_text_mask[:, cur_pos]
-            is_finished = is_finished | (is_end_token & is_generated_token)
-
-        prev_pos = cur_pos
-        if is_finished.all():
-            break
-    print(f"\n⏱️ [Generation loop] {time.time() - time2:.3f}s")
-
+    # Clear GPU memory
     time3 = time.time()
     gc.collect()
     torch.cuda.empty_cache()
     print(f"⏱️ [GC + CUDA cleanup] {time.time() - time3:.3f}s")
 
-    is_finished_list = is_finished.tolist()
-    tokens_list = tokens.tolist()
-
+    # Convert to episodes
     time4 = time.time()
     episodes = []
-    for i in range(bsz // num_answer_per_question):
-        for j in range(num_answer_per_question):
-            idx = i * num_answer_per_question + j
-            generated_token_ids = tokens_list[idx][len(batch.prefix_token_ids[i]) :]
+    generated_ids = generated_ids.tolist()
+    input_ids_list = input_ids.tolist()
 
-            if pad_token_id in generated_token_ids:
-                generated_token_ids = generated_token_ids[
-                    : generated_token_ids.index(pad_token_id)
-                ]
+    for i in range(bsz):
+        prompt_len = len(input_ids_list[i])
+        generated_token_ids = generated_ids[i][prompt_len:]
 
-            generated_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True)
+        if pad_token_id in generated_token_ids:
+            generated_token_ids = generated_token_ids[:generated_token_ids.index(pad_token_id)]
 
-            reward_start = time.time()
-            rewards = reward_function(
-                response=generated_text,
-                numbers=batch.numbers[i],
-                target=batch.target[i],
-                end_token=end_token,
-            )
-            print(f"⏱️ [Reward {idx}] {time.time() - reward_start:.3f}s")
+        generated_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True)
 
-            episode = Episode(
-                prefix=batch.prefix[i],
-                text=batch.prefix[i] + generated_text,
-                prefix_token_ids=batch.prefix_token_ids[i],
-                prefix_tokens=batch.prefix_tokens[i],
-                generated_token_ids=generated_token_ids,
-                is_finished=is_finished_list[idx],
-                reward=rewards["reward"],
-                reward_info=rewards["reward_info"],
-            )
-            episodes.append(episode)
+        reward_start = time.time()
+        base_idx = i // num_answer_per_question
+        rewards = reward_function(
+            response=generated_text,
+            numbers=batch.numbers[base_idx],
+            target=batch.target[base_idx],
+            end_token=end_token,
+        )
+        print(f"⏱️ [Reward {i}] {time.time() - reward_start:.3f}s")
+
+        episode = Episode(
+            prefix=batch.prefix[base_idx],
+            text=batch.prefix[base_idx] + generated_text,
+            prefix_token_ids=batch.prefix_token_ids[base_idx],
+            prefix_tokens=batch.prefix_tokens[base_idx],
+            generated_token_ids=generated_token_ids,
+            is_finished=(end_token_id in generated_token_ids),
+            reward=rewards["reward"],
+            reward_info=rewards["reward_info"],
+        )
+        episodes.append(episode)
+
     print(f"⏱️ [Episode assembly] {time.time() - time4:.3f}s")
-
-    print("\r", end=" " * 100, flush=True)
     print(f"✅ [Total rollout time] {time.time() - total_start:.3f}s")
-
     return episodes
 
 
