@@ -9,8 +9,8 @@ training:
   random_seed: 1337
   max_prompt_len: 256
   max_gen_len: 1024
-  batch_size: 16
-  num_questions_per_batch: 16
+  batch_size: 8
+  num_questions_per_batch: 8
   # Number of examples per gradient accumulation step
   micro_batch_size: 2
   max_grad_norm: 1.0
