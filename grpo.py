@@ -79,8 +79,8 @@ def rollout(
         base_idx = i // num_answer_per_question
         rewards = reward_function(
             response=generated_text,
-            numbers=batch.numbers[base_idx],
-            target=batch.target[base_idx],
+            sentences=batch.sentences[base_idx],
+            # target=batch.target[base_idx],
             end_token=end_token,
         )
 
@@ -94,6 +94,7 @@ def rollout(
             reward=rewards["reward"],
             reward_info=rewards["reward_info"],
         )
+        print(episode)
         episodes.append(episode)
 
     print(f"✅ [Total rollout time] {time.time() - total_start:.3f}s")
