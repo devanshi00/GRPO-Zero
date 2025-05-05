@@ -71,13 +71,16 @@ def main(config_path: str):
     current_time = datetime.now().strftime(r"%Y%m%d-%H%M%S")
     tb_writer = SummaryWriter(log_dir=f"{config['training']['log_dir']}/{current_time}")
 
-    # Load pretrained model and tokenizer from Hugging Face
     model_name = "meta-llama/Llama-3.2-1B-Instruct"
-    model = AutoModelForCausalLM.from_pretrained(model_name).to(device).train()
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        device_map="auto")
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left')
+    
+    # Ensure pad token is defined
     if tokenizer.pad_token is None:
-         tokenizer.add_special_tokens({'pad_token': '[PAD]'})  # Define PAD token
-         model.resize_token_embeddings(len(tokenizer))
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        model.resize_token_embeddings(len(tokenizer))
 
 
 
