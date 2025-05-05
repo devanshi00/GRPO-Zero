@@ -74,7 +74,7 @@ def main(config_path: str):
     # Load pretrained model and tokenizer from Hugging Face
     model_name = "meta-llama/Llama-3.2-1B-Instruct"
     model = AutoModelForCausalLM.from_pretrained(model_name).to(device).train()
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left')
 
     if tokenizer.pad_token is None:
         tokenizer.add_special_tokens({'pad_token': '[PAD]'})  # Define PAD token
