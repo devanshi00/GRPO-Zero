@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 
 from data_types import MiniBatch
-from tokenizer import Tokenizer
+from transformers import PreTrainedTokenizerBase
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
@@ -25,11 +25,22 @@ USER_TEMPLATE = (
 RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
 
 
+def build_chat_prompt(sentence: str) -> str:
+    """Format the input as a chat prompt manually."""
+    user_message = USER_TEMPLATE.format(sentence=sentence)
+    prompt = (
+        f"<|system|>\n{SYSTEM_MESSAGE}\n"
+        f"<|user|>\n{user_message}\n"
+        f"<|assistant|>\n{RESPONSE_PROMPT}"
+    )
+    return prompt
+
+
 class Genderdebiasing(Dataset):
     """Prepare gender-debiasing tasks for training"""
 
-    def __init__(self, tokenizer: Tokenizer, data_path: str, split: str = "train", test_size: int = 100):
-        data = pd.read_csv(Path(data_path) / "winogender_dataset.csv")["sent"]  # Keep only 'sent' column
+    def __init__(self, tokenizer: PreTrainedTokenizerBase, data_path: str, split: str = "train", test_size: int = 100):
+        data = pd.read_csv(Path(data_path) / "winogender_dataset.csv")["sent"]  # Only keep 'sent' column
         train_data, test_data = train_test_split(data, test_size=test_size, random_state=42)
         self.data = train_data if split == "train" else test_data
         self.tokenizer = tokenizer
@@ -45,22 +56,15 @@ class Genderdebiasing(Dataset):
 
     def encode_prefix(self, sentence: str):
         """Prefix is the input prompt for the model."""
-        user_message = USER_TEMPLATE.format(sentence=sentence)
-        prefix = self.tokenizer.encode_chat_with_response_prompt(
-            [
-                {"role": "system", "content": SYSTEM_MESSAGE},
-                {"role": "user", "content": user_message},
-            ],
-            RESPONSE_PROMPT,
-        )
+        prefix = build_chat_prompt(sentence)
         if not prefix.strip():
             raise ValueError("Prefix prompt is empty. Check sentence or USER_TEMPLATE.")
-
-        tokens = self.tokenizer.tokenize(prefix)
+        
+        tokenized = self.tokenizer(prefix, add_special_tokens=False)
         return {
             "prefix": prefix,
-            "prefix_tokens": tokens.tokens,
-            "prefix_token_ids": tokens.ids,
+            "prefix_tokens": self.tokenizer.convert_ids_to_tokens(tokenized["input_ids"]),
+            "prefix_token_ids": tokenized["input_ids"],
         }
 
     @staticmethod
@@ -97,7 +101,6 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
 
 def answer_reward_function(response: str, input_sentence: str = "") -> float:
     """Penalizes for gendered pronouns, rewards word matches with input sentence."""
-    # Expanded list of gendered pronouns
     if re.search(r"\b(she|he|him|her|his|hers)\b", response, re.IGNORECASE):
         return -10.0
 
