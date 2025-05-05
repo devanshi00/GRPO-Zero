@@ -172,7 +172,8 @@ def update_policy(
             logits = model(input_ids).logits.float()
 
         log_probs = -torch.nn.functional.cross_entropy(
-            logits.view(-1, logits.size(-1)),
+           
+            logits.reshape(-1, logits.size(-1)), 
             target_ids.view(-1),
             ignore_index=pad_token_id,
             reduction="none"
