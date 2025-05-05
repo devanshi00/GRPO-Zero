@@ -150,6 +150,8 @@ def update_policy(
         batch = episodes[i:j]
         lens = [len(ep.prefix_token_ids) + len(ep.generated_token_ids) for ep in batch]
         max_len = max(lens)
+        print("MMMMMMMMMMM")
+        print(max_len)
 
         token_ids = [
             ep.prefix_token_ids + ep.generated_token_ids + [pad_token_id] * (max_len - l)
