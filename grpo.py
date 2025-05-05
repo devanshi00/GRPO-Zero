@@ -174,10 +174,10 @@ def update_policy(
         log_probs = -torch.nn.functional.cross_entropy(
            
             logits.reshape(-1, logits.size(-1)), 
-            target_ids.view(-1),
+            target_ids.reshape(-1),
             ignore_index=pad_token_id,
             reduction="none"
-        ).view(input_ids.size(0), -1)
+        ).reshape(input_ids.size(0), -1)
 
         with torch.no_grad():
             entropy += (compute_entropy(logits) * target_masks).sum() / num_target_tokens
