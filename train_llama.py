@@ -8,24 +8,11 @@ import numpy as np
 import torch
 import yaml
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard.writer import SummaryWriter
-from winogender import Genderdebiasing,reward_function
-# from countdown_task import CountdownTasksDataset, reward_function
+from torch.utils.tensorboard import SummaryWriter
+from winogender import Genderdebiasing, reward_function
 from grpo import rollout, update_policy
 from optimizer import MemoryEfficientAdamW
-# from qwen2_model import Transformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
-model_name = "meta-llama/Llama-3.2-1B-Instruct"
-model = AutoModelForCausalLM.from_pretrained(model_name)
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-# Step 1: Add pad_token if not present
-if tokenizer.pad_token is None:
-    tokenizer.add_special_tokens({'pad_token': 'pad'})
-
-# Step 2: Resize model embeddings to include the new token
-model.resize_token_embeddings(len(tokenizer))
 
 
 def evaluate(model, tokenizer, device, dtype, config):
@@ -36,8 +23,7 @@ def evaluate(model, tokenizer, device, dtype, config):
         test_size=config["data"]["test_size"],
     )
     generator = torch.Generator(device=device)
-    # We reduce the batch size by half as we want to
-    # generate twice as long trajectories.
+
     dataloader = DataLoader(
         test_dataset,
         shuffle=False,
@@ -46,6 +32,7 @@ def evaluate(model, tokenizer, device, dtype, config):
         batch_size=config["training"]["batch_size"] // 2,
         drop_last=False,
     )
+
     success = []
     for batch in dataloader:
         episodes = rollout(
@@ -66,7 +53,6 @@ def main(config_path: str):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
-    pretrained_model_path = Path(config["model"]["pretrained_model_path"])
     device = torch.device(config["model"]["device"])
     dtype_map = {
         "bfloat16": torch.bfloat16,
@@ -74,15 +60,25 @@ def main(config_path: str):
         "float32": torch.float32,
     }
     dtype = dtype_map.get(config["model"]["dtype"], torch.bfloat16)
+
     torch.set_default_device(device)
-    torch.random.manual_seed(config["training"]["random_seed"])
+    torch.manual_seed(config["training"]["random_seed"])
+
     BATCH_SIZE = config["training"]["batch_size"]
     NUM_QUESTIONS_PER_BATCH = config["training"]["num_questions_per_batch"]
     NUM_ANSWERS_PER_QUESTION = BATCH_SIZE // NUM_QUESTIONS_PER_BATCH
 
     current_time = datetime.now().strftime(r"%Y%m%d-%H%M%S")
     tb_writer = SummaryWriter(log_dir=f"{config['training']['log_dir']}/{current_time}")
-    tokenizer = Tokenizer(str(pretrained_model_path / "tokenizer.json"))
+
+    # Load pretrained model and tokenizer from Hugging Face
+    model_name = "meta-llama/Llama-3.2-1B-Instruct"
+    model = AutoModelForCausalLM.from_pretrained(model_name).to(device).train()
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})  # Define PAD token
+        model.resize_token_embeddings(len(tokenizer))
 
     train_dataset = Genderdebiasing(
         data_path=config["data"]["path"],
@@ -98,8 +94,6 @@ def main(config_path: str):
         generator=generator,
         batch_size=NUM_QUESTIONS_PER_BATCH,
     )
-
-    model = LlamaForCausalLM.from_pretrained(pretrained_model_path, device=device).train()
 
     optimizer = MemoryEfficientAdamW(
         model.parameters(),
@@ -124,8 +118,10 @@ def main(config_path: str):
             device=device,
             dtype=dtype,
         )
+
         if config["training"]["skip_unfinished_episodes"]:
-            episodes = [episode for episode in episodes if episode.is_finished]
+            episodes = [ep for ep in episodes if ep.is_finished]
+
         results = update_policy(
             model=model,
             optimizer=optimizer,
@@ -136,18 +132,16 @@ def main(config_path: str):
             device=device,
             dtype=dtype,
         )
+
         torch.cuda.synchronize()
         end_time = time.time()
         duration = end_time - start_time
         start_time = end_time
 
-        # compute and log important metrics
-        reward = [episode.reward for episode in episodes]
-        formatted_reward = [
-            episode.reward_info["format_reward"] for episode in episodes
-        ]
-        answer_reward = [episode.reward_info["answer_reward"] for episode in episodes]
-        num_finished_episodes = sum(episode.is_finished for episode in episodes)
+        reward = [ep.reward for ep in episodes]
+        formatted_reward = [ep.reward_info["format_reward"] for ep in episodes]
+        answer_reward = [ep.reward_info["answer_reward"] for ep in episodes]
+        num_finished_episodes = sum(ep.is_finished for ep in episodes)
         mean_reward = np.mean(reward)
         std_reward = np.std(reward)
         success_rate = np.mean(answer_reward)
@@ -156,9 +150,8 @@ def main(config_path: str):
         entropy = results["entropy"]
         lr = optimizer.param_groups[0]["lr"]
         loss = results["loss"]
-        mean_response_len = np.mean(
-            [len(episode.generated_token_ids) for episode in episodes]
-        )
+        mean_response_len = np.mean([len(ep.generated_token_ids) for ep in episodes])
+
         print(
             f"\rStep {step}, mean_reward: {mean_reward:.2f}, "
             f"train success_rate: {success_rate:.2f}, "
@@ -167,6 +160,7 @@ def main(config_path: str):
             f"mean_response_len: {mean_response_len:.2f}, "
             f"entropy: {entropy:.2f}"
         )
+
         if step % config["training"]["eval_interval"] == 0:
             eval_success_rate = evaluate(model, tokenizer, device, dtype, config)
             print(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
@@ -183,12 +177,11 @@ def main(config_path: str):
         tb_writer.add_scalar("learning_rate", lr, step)
         tb_writer.add_scalar("mean_response_len", mean_response_len, step)
         tb_writer.add_scalar("entropy", entropy, step)
-        for i, episode in enumerate(episodes):
-            # TensorBoard treats text as markdown.
-            text = html.escape(episode.text)
+
+        for i, ep in enumerate(episodes):
+            text = html.escape(ep.text)
             tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
 
-        # save checkpoint
         if step % config["training"]["ckpt_save_interval"] == 0:
             output_file = ckpt_dir / f"ckpt_{step:06d}.pt"
             torch.save(model.state_dict(), output_file)
