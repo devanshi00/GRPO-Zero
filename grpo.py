@@ -80,6 +80,8 @@ def rollout(
             sentence=batch.sentences[base_idx],
             end_token=end_token,
         )
+        print(f"[Rollout] Rewards: {rewards}")
+
 
         episode = Episode(
             prefix=batch.prefix[base_idx],
@@ -108,11 +110,19 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     for group in groups.values():
         rewards = [ep.reward for ep in group]
         mean, std = np.mean(rewards), np.std(rewards)
-        for ep in group:
-            norm_reward = (ep.reward - mean) / (std + 1e-4)
-            output.append(dataclasses.replace(ep, reward=norm_reward))
+
+        # If all rewards are the same or nearly so, avoid division
+        if std < 1e-6:
+            for ep in group:
+                norm_reward = ep.reward - mean  # or just 0.0
+                output.append(dataclasses.replace(ep, reward=norm_reward))
+        else:
+            for ep in group:
+                norm_reward = (ep.reward - mean) / (std + 1e-4)
+                output.append(dataclasses.replace(ep, reward=norm_reward))
 
     return output
+
 
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
